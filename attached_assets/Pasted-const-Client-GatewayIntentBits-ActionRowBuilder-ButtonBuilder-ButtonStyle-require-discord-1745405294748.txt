@@ -1,0 +1,91 @@
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
+
+// Store dice states for each message
+const rollStates = new Map();
+
+client.on('ready', () => {
+    console.log(`Logged in as ${client.user.tag}!`);
+
+  // Register slash command
+  client.application.commands.create({
+    name: 'roll',
+    description: 'Roll 3 dice and keep/reroll them'
+  });
+});
+
+client.on('interactionCreate', async interaction => {
+  if (interaction.isCommand() && interaction.commandName === 'roll') {
+    // Initial roll with 3 dice
+    const dice = Array.from({ length: 3 }, () => Math.floor(Math.random() * 6) + 1);
+
+    // Create buttons
+    const buttons = dice.map((value, index) => createDiceButton(value, index));
+
+    // Send message with buttons
+    const message = await interaction.reply({
+      content: 'Roll 3 dice!\nClick dice to keep them, others will reroll:',
+      components: [new ActionRowBuilder().addComponents(buttons)],
+      fetchReply: true
+    });
+
+    // Store initial state
+    rollStates.set(message.id, { dice, kept: [] });
+  }
+  else if (interaction.isButton()) {
+    const messageId = interaction.message.id;
+    const state = rollStates.get(messageId);
+
+    if (!state) return;
+
+    // Get clicked die index from customId (format: "die0")
+    const index = parseInt(interaction.customId.split('')[1]);
+
+    // Toggle keep status
+    if (!state.kept.includes(index)) {
+      state.kept.push(index);
+    }
+
+    // Reroll non-kept dice
+    state.dice = state.dice.map((val, i) => 
+      state.kept.includes(i) ? val : Math.floor(Math.random() * 6) + 1
+    );
+
+    // Create updated buttons
+    const buttons = state.dice.map((value, i) => 
+      createDiceButton(value, i, state.kept.includes(i))
+    );
+
+    // Update message or show final result
+    if (state.kept.length === 3) {
+      await interaction.update({
+        content: `🎲 **Final Result**: ${state.dice.join(' | ')}`,
+        components: []
+      });
+      rollStates.delete(messageId);
+    } else {
+      await interaction.update({
+        content: `🎲 Current dice: ${state.dice.join(' ')}\nClick dice to keep:`,
+        components: [new ActionRowBuilder().addComponents(buttons)]
+      });
+      rollStates.set(messageId, state);
+    }
+  }
+});
+
+function createDiceButton(value, index, isKept = false) {
+  return new ButtonBuilder()
+  .setCustomId(`die${index}`)
+
+    .setLabel(value.toString())
+    .setStyle(isKept ? ButtonStyle.Success : ButtonStyle.Primary)
+    .setDisabled(isKept);
+}
+
+client.login(process.env.TOKEN);
